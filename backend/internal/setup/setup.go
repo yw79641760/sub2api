@@ -165,12 +165,13 @@ func NeedsSetup() bool {
 
 func buildPostgresDSN(cfg *DatabaseConfig, dbName string) string {
 	// Build DSN from individual fields with search_path support
+	// statement_cache_size=0 禁用预编译语句缓存，解决连接池（PgBouncer/Supabase）问题
 	schema := cfg.Schema
 	if schema == "" {
 		schema = "public"
 	}
 	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s",
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s statement_cache_size=0",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, dbName, cfg.SSLMode, schema,
 	)
 }

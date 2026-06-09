@@ -1253,15 +1253,15 @@ func (d *DatabaseConfig) DSN() string {
 	if schema == "" {
 		schema = "public"
 	}
-	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
+	// statement_cache_size=0 禁用预编译语句缓存，解决连接池（PgBouncer/Supabase）问题
 	if d.Password == "" {
 		return fmt.Sprintf(
-			"host=%s port=%d user=%s dbname=%s sslmode=%s search_path=%s",
+			"host=%s port=%d user=%s dbname=%s sslmode=%s search_path=%s statement_cache_size=0",
 			d.Host, d.Port, d.User, d.DBName, d.SSLMode, schema,
 		)
 	}
 	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s",
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s statement_cache_size=0",
 		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode, schema,
 	)
 }
@@ -1275,15 +1275,15 @@ func (d *DatabaseConfig) DSNWithTimezone(tz string) string {
 	if schema == "" {
 		schema = "public"
 	}
-	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
+	// statement_cache_size=0 禁用预编译语句缓存，解决连接池（PgBouncer/Supabase）问题
 	if d.Password == "" {
 		return fmt.Sprintf(
-			"host=%s port=%d user=%s dbname=%s sslmode=%s search_path=%s TimeZone=%s",
+			"host=%s port=%d user=%s dbname=%s sslmode=%s search_path=%s TimeZone=%s statement_cache_size=0",
 			d.Host, d.Port, d.User, d.DBName, d.SSLMode, schema, tz,
 		)
 	}
 	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s TimeZone=%s",
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s TimeZone=%s statement_cache_size=0",
 		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode, schema, tz,
 	)
 }
