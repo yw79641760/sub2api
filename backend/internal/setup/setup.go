@@ -617,6 +617,7 @@ func AutoSetupFromEnv() error {
 			logger.LegacyPrintf("setup", "REDIS_URL parsed: host=%s", cfg.Redis.Host)
 		}
 	// Test database connection
+		logger.LegacyPrintf("setup", "DEBUG env: DATABASE_URL set? [%s]", os.Getenv("DATABASE_URL"))
 		logger.LegacyPrintf("setup", "DEBUG: dbURL=[%s] host=[%s]", dbURL, cfg.Database.Host)
 	logger.LegacyPrintf("setup", "%s", "Testing database connection...")
 	if err := TestDatabaseConnection(&cfg.Database); err != nil {
