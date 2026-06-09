@@ -89,7 +89,7 @@ WHERE deleted_at IS NULL
 
 INSERT INTO auth_identity_migration_reports (report_type, report_key, details)
 SELECT
-    'oidc_synthetic_email_requires_manual_recovery',
+    'oidc_synthetic_email_manual_recovery',
     CAST(u.id AS TEXT),
     jsonb_build_object(
         'user_id', u.id,
