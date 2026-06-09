@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"log"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -546,6 +547,7 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 // AutoSetupFromEnv performs automatic setup using environment variables
 // This is designed for Docker deployment where all config is passed via env vars
 func AutoSetupFromEnv() error {
+	log.Printf("DEBUG: DATABASE_URL=[%s] SUB2API_DATABASE_URL=[%s]\n", os.Getenv("DATABASE_URL"), os.Getenv("SUB2API_DATABASE_URL"))
 	logger.LegacyPrintf("setup", "DEBUG: DATABASE_URL=[%s]", os.Getenv("DATABASE_URL"))
 	logger.LegacyPrintf("setup", "DEBUG: SUB2API_DATABASE_URL=[%s]", os.Getenv("SUB2API_DATABASE_URL"))
 	logger.LegacyPrintf("setup", "%s", "Auto setup enabled, configuring from environment variables...")
