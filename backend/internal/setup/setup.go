@@ -546,6 +546,8 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 // AutoSetupFromEnv performs automatic setup using environment variables
 // This is designed for Docker deployment where all config is passed via env vars
 func AutoSetupFromEnv() error {
+	logger.LegacyPrintf("setup", "DEBUG: DATABASE_URL=[%s]", os.Getenv("DATABASE_URL"))
+	logger.LegacyPrintf("setup", "DEBUG: SUB2API_DATABASE_URL=[%s]", os.Getenv("SUB2API_DATABASE_URL"))
 	logger.LegacyPrintf("setup", "%s", "Auto setup enabled, configuring from environment variables...")
 	logger.LegacyPrintf("setup", "Data directory: %s", GetDataDir())
 
