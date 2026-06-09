@@ -341,10 +341,12 @@ func createInstallLock() error {
 }
 
 func initializeDatabase(cfg *SetupConfig) error {
+	// Build DSN with search_path support
 	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s",
 		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
 		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
+		cfg.Database.Schema,
 	)
 
 	db, err := sql.Open("postgres", dsn)
@@ -364,10 +366,12 @@ func initializeDatabase(cfg *SetupConfig) error {
 }
 
 func createAdminUser(cfg *SetupConfig) (bool, string, error) {
+	// Build DSN with search_path support
 	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s",
 		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
 		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
+		cfg.Database.Schema,
 	)
 
 	db, err := sql.Open("postgres", dsn)
