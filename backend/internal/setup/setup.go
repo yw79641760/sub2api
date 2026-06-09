@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -88,6 +89,7 @@ type DatabaseConfig struct {
 	Password string `json:"password" yaml:"password"`
 	DBName   string `json:"dbname" yaml:"dbname"`
 	SSLMode  string `json:"sslmode" yaml:"sslmode"`
+	Schema   string `json:"schema" yaml:"schema"`
 }
 
 type RedisConfig struct {
@@ -161,9 +163,14 @@ func NeedsSetup() bool {
 }
 
 func buildPostgresDSN(cfg *DatabaseConfig, dbName string) string {
+	// Build DSN from individual fields with search_path support
+	schema := cfg.Schema
+	if schema == "" {
+		schema = "public"
+	}
 	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, dbName, cfg.SSLMode,
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s",
+		cfg.Host, cfg.Port, cfg.User, cfg.Password, dbName, cfg.SSLMode, schema,
 	)
 }
 
@@ -549,6 +556,10 @@ func AutoSetupFromEnv() error {
 	}
 
 	// Build config from environment variables
+	// Support DATABASE_URL and REDIS_URL (priority over individual fields)
+	dbURL := getEnvOrDefault("DATABASE_URL", "")
+	redisURL := getEnvOrDefault("REDIS_URL", "")
+
 	cfg := &SetupConfig{
 		Database: DatabaseConfig{
 			Host:     getEnvOrDefault("DATABASE_HOST", "localhost"),
@@ -557,6 +568,7 @@ func AutoSetupFromEnv() error {
 			Password: getEnvOrDefault("DATABASE_PASSWORD", ""),
 			DBName:   getEnvOrDefault("DATABASE_DBNAME", "sub2api"),
 			SSLMode:  getEnvOrDefault("DATABASE_SSLMODE", "disable"),
+			Schema:   getEnvOrDefault("DATABASE_SCHEMA", "public"),
 		},
 		Redis: RedisConfig{
 			Host:      getEnvOrDefault("REDIS_HOST", "localhost"),
@@ -591,6 +603,19 @@ func AutoSetupFromEnv() error {
 		logger.LegacyPrintf("setup", "%s", "Warning: JWT secret auto-generated. Consider setting a fixed secret for production.")
 	}
 
+		// Use DATABASE_URL / REDIS_URL if set
+		if dbURL != "" {
+			if err := parseDatabaseURL(dbURL, &cfg.Database); err != nil {
+				return fmt.Errorf("parse DATABASE_URL: %w", err)
+			}
+			logger.LegacyPrintf("setup", "DATABASE_URL parsed: host=%s search_path=%s", cfg.Database.Host, cfg.Database.Schema)
+		}
+		if redisURL != "" {
+			if err := parseRedisURL(redisURL, &cfg.Redis); err != nil {
+				return fmt.Errorf("parse REDIS_URL: %w", err)
+			}
+			logger.LegacyPrintf("setup", "REDIS_URL parsed: host=%s", cfg.Redis.Host)
+		}
 	// Test database connection
 	logger.LegacyPrintf("setup", "%s", "Testing database connection...")
 	if err := TestDatabaseConnection(&cfg.Database); err != nil {
@@ -645,5 +670,91 @@ func AutoSetupFromEnv() error {
 	logger.LegacyPrintf("setup", "%s", "Installation lock created")
 
 	logger.LegacyPrintf("setup", "%s", "Auto setup completed successfully!")
+	return nil
+}
+
+// parsedURL holds parsed components from a connection URL
+type setupParsedURL struct {
+	Scheme   string
+	Host    string
+	Port    int
+	User    string
+	Password string
+	Path    string
+	Query   url.Values
+}
+
+// parseURL parses a database or redis connection URL
+func parseURL(urlStr, defaultScheme string) (*setupParsedURL, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, err
+	}
+
+	p := &setupParsedURL{
+		Scheme: u.Scheme,
+		Host:   u.Hostname(),
+		Query:  u.Query(),
+	}
+
+	// Parse port
+	if u.Port() != "" {
+		fmt.Sscanf(u.Port(), "%d", &p.Port)
+	}
+
+	// Parse userinfo (user:password)
+	if u.User != nil {
+		p.User = u.User.Username()
+		p.Password, _ = u.User.Password()
+	}
+
+	// Path (database name for postgres, db number for redis)
+	p.Path = strings.TrimPrefix(u.Path, "/")
+
+	return p, nil
+}
+
+// parseDatabaseURL parses a PostgreSQL connection URL and populates the config
+func parseDatabaseURL(urlStr string, cfg *DatabaseConfig) error {
+	u, err := parseURL(urlStr, "postgres")
+	if err != nil {
+		return err
+	}
+	cfg.Host = u.Host
+	cfg.Port = u.Port
+	cfg.User = u.User
+	cfg.Password = u.Password
+	cfg.DBName = u.Path
+	if v := u.Query.Get("sslmode"); v != "" {
+		cfg.SSLMode = v
+	}
+	if v := u.Query.Get("search_path"); v != "" {
+		cfg.Schema = v
+	}
+	return nil
+}
+
+// parseRedisURL parses a Redis connection URL and populates the config
+func parseRedisURL(urlStr string, cfg *RedisConfig) error {
+	u, err := parseURL(urlStr, "redis")
+	if err != nil {
+		return err
+	}
+	cfg.Host = u.Host
+	cfg.Port = u.Port
+	if u.Password != "" {
+		cfg.Password = u.Password
+	}
+	// Parse db from path (e.g., /0)
+	if u.Path != "" {
+		var db int
+		if _, err := fmt.Sscanf(u.Path, "/%d", &db); err == nil {
+			cfg.DB = db
+		}
+	}
+	// Detect TLS from scheme
+	if u.Scheme == "rediss" {
+		cfg.EnableTLS = true
+	}
 	return nil
 }

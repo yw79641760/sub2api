@@ -15,6 +15,48 @@ import (
 	"github.com/spf13/viper"
 )
 
+// parsedURL holds parsed components from a connection URL
+type parsedURL struct {
+	Scheme   string
+	Host     string
+	Port     int
+	User     string
+	Password string
+	Path     string
+	Query    url.Values
+}
+
+// parseURL parses a database or redis connection URL
+// Supports: postgres://, redis://, rediss://
+func parseURL(urlStr, defaultScheme string) (*parsedURL, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, err
+	}
+
+	p := &parsedURL{
+		Scheme: u.Scheme,
+		Host:   u.Hostname(),
+		Query:  u.Query(),
+	}
+
+	// Parse port
+	if u.Port() != "" {
+		fmt.Sscanf(u.Port(), "%d", &p.Port)
+	}
+
+	// Parse userinfo (user:password)
+	if u.User != nil {
+		p.User = u.User.Username()
+		p.Password, _ = u.User.Password()
+	}
+
+	// Path (database name for postgres, db number for redis)
+	p.Path = strings.TrimPrefix(u.Path, "/")
+
+	return p, nil
+}
+
 const (
 	RunModeStandard = "standard"
 	RunModeSimple   = "simple"
@@ -1097,12 +1139,20 @@ func (s *ServerConfig) Address() string {
 // DatabaseConfig 数据库连接配置
 // 性能优化：新增连接池参数，避免频繁创建/销毁连接
 type DatabaseConfig struct {
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	User     string `mapstructure:"user"`
+	// URL: 数据库连接 URL (优先于独立字段)
+	// 格式: postgres://user:password@host:port/dbname?sslmode=disable&search_path=public&timezone=Asia/Shanghai
+	URLString string `mapstructure:"url"`
+	Host string `mapstructure:"host"`
+	Port int    `mapstructure:"port"`
+	User string `mapstructure:"user"`
+	// Password: 数据库密码
 	Password string `mapstructure:"password"`
-	DBName   string `mapstructure:"dbname"`
-	SSLMode  string `mapstructure:"sslmode"`
+	// DBName: 数据库名称
+	DBName string `mapstructure:"dbname"`
+	// SSLMode: SSL 模式 (disable, prefer, require, verify-ca, verify-full)
+	SSLMode string `mapstructure:"sslmode"`
+	// Schema: PostgreSQL schema (default: public), 支持多租户场景
+	Schema string `mapstructure:"schema"`
 	// 连接池配置（性能优化：可配置化连接池参数）
 	// MaxOpenConns: 最大打开连接数，控制数据库连接上限，防止资源耗尽
 	MaxOpenConns int `mapstructure:"max_open_conns"`
@@ -1121,17 +1171,58 @@ type DatabaseConfig struct {
 	UserPlatformQuotaFlushBatchSize int `mapstructure:"user_platform_quota_flush_batch_size"`
 }
 
+// ParseURL parses a PostgreSQL connection URL and populates the config fields.
+// URL format: postgres://user:password@host:port/dbname?sslmode=disable&search_path=public&timezone=Asia/Shanghai
+// Supported query params: sslmode, search_path, timezone
+func (d *DatabaseConfig) ParseURL(urlStr string) error {
+	if urlStr == "" {
+		return nil
+	}
+	u, err := parseURL(urlStr, "postgres")
+	if err != nil {
+		return fmt.Errorf("parse database url: %w", err)
+	}
+	d.Host = u.Host
+	d.Port = u.Port
+	d.User = u.User
+	d.Password = u.Password
+	d.DBName = u.Path
+
+	// Parse query params
+	if v := u.Query.Get("sslmode"); v != "" {
+		d.SSLMode = v
+	}
+	if v := u.Query.Get("search_path"); v != "" {
+		d.Schema = v
+	}
+	// timezone is handled in DSNWithTimezone via parameter, not stored
+
+	return nil
+}
+
+// URL returns the PostgreSQL connection URL representation
+func (d *DatabaseConfig) URL() string {
+	if d.URLString != "" {
+		return d.URLString
+	}
+	return "postgres://" + d.User + ":" + d.Password + "@" + d.Host + ":" + fmt.Sprint(d.Port) + "/" + d.DBName + "?sslmode=" + d.SSLMode + "&search_path=" + d.Schema
+}
+
 func (d *DatabaseConfig) DSN() string {
+	schema := d.Schema
+	if schema == "" {
+		schema = "public"
+	}
 	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
 	if d.Password == "" {
 		return fmt.Sprintf(
-			"host=%s port=%d user=%s dbname=%s sslmode=%s",
-			d.Host, d.Port, d.User, d.DBName, d.SSLMode,
+			"host=%s port=%d user=%s dbname=%s sslmode=%s search_path=%s",
+			d.Host, d.Port, d.User, d.DBName, d.SSLMode, schema,
 		)
 	}
 	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode,
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s",
+		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode, schema,
 	)
 }
 
@@ -1140,24 +1231,31 @@ func (d *DatabaseConfig) DSNWithTimezone(tz string) string {
 	if tz == "" {
 		tz = "Asia/Shanghai"
 	}
+	schema := d.Schema
+	if schema == "" {
+		schema = "public"
+	}
 	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
 	if d.Password == "" {
 		return fmt.Sprintf(
-			"host=%s port=%d user=%s dbname=%s sslmode=%s TimeZone=%s",
-			d.Host, d.Port, d.User, d.DBName, d.SSLMode, tz,
+			"host=%s port=%d user=%s dbname=%s sslmode=%s search_path=%s TimeZone=%s",
+			d.Host, d.Port, d.User, d.DBName, d.SSLMode, schema, tz,
 		)
 	}
 	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode, tz,
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s search_path=%s TimeZone=%s",
+		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode, schema, tz,
 	)
 }
 
 // RedisConfig Redis 连接配置
 // 性能优化：新增连接池和超时参数，提升高并发场景下的吞吐量
 type RedisConfig struct {
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
+	// URL: Redis 连接 URL (优先于独立字段)
+	// 格式: redis://host:port 或 rediss://host:port (TLS)
+	ConnURL string `mapstructure:"url"`
+	Host   string `mapstructure:"host"`
+	Port   int    `mapstructure:"port"`
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
 	// 连接池与超时配置（性能优化：可配置化连接池参数）
@@ -1173,6 +1271,58 @@ type RedisConfig struct {
 	MinIdleConns int `mapstructure:"min_idle_conns"`
 	// EnableTLS: 是否启用 TLS/SSL 连接
 	EnableTLS bool `mapstructure:"enable_tls"`
+}
+
+// ParseURL parses a Redis connection URL and populates the config fields.
+// URL format: redis://host:port or rediss://host:port (TLS)
+// Supports: redis://, rediss://
+func (r *RedisConfig) ParseURL(urlStr string) error {
+	if urlStr == "" {
+		return nil
+	}
+	u, err := parseURL(urlStr, "redis")
+	if err != nil {
+		return fmt.Errorf("parse redis url: %w", err)
+	}
+	r.Host = u.Host
+	r.Port = u.Port
+	if u.Password != "" {
+		r.Password = u.Password
+	}
+	// Parse db from path (e.g., /0 for db 0)
+	if u.Path != "" {
+		// u.Path includes leading slash
+		var db int
+		if _, err := fmt.Sscanf(u.Path, "/%d", &db); err == nil {
+			r.DB = db
+		}
+	}
+	// Detect TLS from scheme
+	if u.Scheme == "rediss" {
+		r.EnableTLS = true
+	}
+
+	return nil
+}
+
+// URL returns the Redis connection URL representation
+func (r *RedisConfig) URLString() string {
+	if r.ConnURL != "" {
+		return r.ConnURL
+	}
+	scheme := "redis"
+	if r.EnableTLS {
+		scheme = "rediss"
+	}
+	path := ""
+	if r.DB != 0 {
+		path = fmt.Sprintf("/%d", r.DB)
+	}
+	password := ""
+	if r.Password != "" {
+		password = ":" + r.Password + "@"
+	}
+	return scheme + "://" + password + r.Host + ":" + fmt.Sprint(r.Port) + path
 }
 
 func (r *RedisConfig) Address() string {
@@ -1530,6 +1680,22 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	return &cfg, nil
 }
 
+// ParseURLConfigs parses DATABASE_URL and REDIS_URL environment variables and populates the config fields.
+// This should be called after viper.Unmarshal but before using the config.
+func ParseURLConfigs(cfg *Config) error {
+	if cfg.Database.URLString != "" {
+		if err := cfg.Database.ParseURL(cfg.Database.URLString); err != nil {
+			return fmt.Errorf("parse database url: %w", err)
+		}
+	}
+	if cfg.Redis.ConnURL != "" {
+		if err := cfg.Redis.ParseURL(cfg.Redis.ConnURL); err != nil {
+			return fmt.Errorf("parse redis url: %w", err)
+		}
+	}
+	return nil
+}
+
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
 
@@ -1685,12 +1851,14 @@ func setDefaults() {
 	viper.SetDefault("dingtalk_connect.username_overwrite_policy", "if_empty")
 
 	// Database
+	viper.SetDefault("database.url", "")
 	viper.SetDefault("database.host", "localhost")
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
 	viper.SetDefault("database.dbname", "sub2api")
 	viper.SetDefault("database.sslmode", "prefer")
+	viper.SetDefault("database.schema", "public")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)
 	viper.SetDefault("database.conn_max_lifetime_minutes", 30)
@@ -1700,6 +1868,7 @@ func setDefaults() {
 	viper.SetDefault("database.user_platform_quota_flush_batch_size", 1000)
 
 	// Redis
+	viper.SetDefault("redis.url", "")
 	viper.SetDefault("redis.host", "localhost")
 	viper.SetDefault("redis.port", 6379)
 	viper.SetDefault("redis.password", "")
