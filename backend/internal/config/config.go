@@ -57,6 +57,46 @@ func parseURL(urlStr, defaultScheme string) (*parsedURL, error) {
 	return p, nil
 }
 
+// parseDatabaseURL parses a PostgreSQL connection URL and populates the config
+func parseDatabaseURL(cfg *DatabaseConfig, urlStr string) error {
+	u, err := parseURL(urlStr, "postgres")
+	if err != nil {
+		return err
+	}
+	cfg.Host = u.Host
+	cfg.Port = u.Port
+	cfg.User = u.User
+	cfg.Password = u.Password
+	cfg.DBName = u.Path
+	if v := u.Query.Get("sslmode"); v != "" {
+		cfg.SSLMode = v
+	}
+	if v := u.Query.Get("search_path"); v != "" {
+		cfg.Schema = v
+	}
+	return nil
+}
+
+// parseRedisURL parses a Redis connection URL and populates the config
+func parseRedisURL(cfg *RedisConfig, urlStr string) error {
+	u, err := parseURL(urlStr, "redis")
+	if err != nil {
+		return err
+	}
+	cfg.Host = u.Host
+	cfg.Port = u.Port
+	if u.Password != "" {
+		cfg.Password = u.Password
+	}
+	// Parse db from path (e.g., /0)
+	if u.Path != "" {
+		fmt.Sscanf(u.Path, "%d", &cfg.DB)
+	}
+	// Handle TLS based on scheme
+	cfg.EnableTLS = u.Scheme == "rediss"
+	return nil
+}
+
 const (
 	RunModeStandard = "standard"
 	RunModeSimple   = "simple"
@@ -1547,6 +1587,28 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config error: %w", err)
 	}
+
+	// 解析 DATABASE_URL 环境变量（优先级高于独立字段）
+	// 格式: postgres://user:password@host:port/dbname?sslmode=disable&search_path=schema
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		if err := parseDatabaseURL(&cfg.Database, dbURL); err != nil {
+			return nil, fmt.Errorf("parse DATABASE_URL error: %w", err)
+		}
+	}
+
+	// 解析 REDIS_URL 环境变量（优先级高于独立字段）
+	// 格式: redis://host:port 或 rediss://host:port (TLS)
+	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+		if err := parseRedisURL(&cfg.Redis, redisURL); err != nil {
+			return nil, fmt.Errorf("parse REDIS_URL error: %w", err)
+		}
+	}
+
+	// 解析 DATABASE_SCHEMA 环境变量
+	if dbSchema := os.Getenv("DATABASE_SCHEMA"); dbSchema != "" {
+		cfg.Database.Schema = dbSchema
+	}
+
 	if cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs == 0 {
 		cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
 	}
