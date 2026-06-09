@@ -186,6 +186,12 @@ func TestDatabaseConnection(cfg *DatabaseConfig) error {
 	// created yet, so the bootstrap connection must use PostgreSQL's maintenance DB.
 	defaultDSN, targetDSN := buildDatabaseConnectionDSNs(cfg)
 
+	// Check if DROP_SCHEMA env var is set to reset schema
+	dropSchema := os.Getenv("DROP_SCHEMA")
+	if dropSchema == "true" || dropSchema == "1" || dropSchema == "yes" {
+		logger.LegacyPrintf("setup", "DROP_SCHEMA enabled, will reset schema before initialization")
+	}
+
 	db, err := sql.Open("postgres", defaultDSN)
 	if err != nil {
 		return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
@@ -359,6 +365,29 @@ func initializeDatabase(cfg *SetupConfig) error {
 			logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
 		}
 	}()
+
+	// Check if DROP_SCHEMA env var is set to reset schema
+	dropSchema := os.Getenv("DROP_SCHEMA")
+	if dropSchema == "true" || dropSchema == "1" || dropSchema == "yes" {
+		schema := cfg.Database.Schema
+		if schema == "" {
+			schema = "public"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Drop all tables in the schema
+		logger.LegacyPrintf("setup", "DROP_SCHEMA enabled, dropping all tables in schema '%s'...", schema)
+		_, err := db.ExecContext(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schema))
+		if err != nil {
+			return fmt.Errorf("failed to drop schema: %w", err)
+		}
+		_, err = db.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA %s", schema))
+		if err != nil {
+			return fmt.Errorf("failed to create schema: %w", err)
+		}
+		logger.LegacyPrintf("setup", "Schema '%s' reset completed", schema)
+	}
 
 	migrationCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
