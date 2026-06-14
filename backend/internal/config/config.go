@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -1309,6 +1310,9 @@ type RedisConfig struct {
 	PoolSize int `mapstructure:"pool_size"`
 	// MinIdleConns: 最小空闲连接数，保持热连接减少冷启动延迟
 	MinIdleConns int `mapstructure:"min_idle_conns"`
+	// IdleTimeoutSeconds: 空闲连接超时（秒），0 表示不超时
+	// 用于控制连接池中空闲连接的生命周期，避免长时间空闲的连接占用资源
+	IdleTimeoutSeconds int `mapstructure:"idle_timeout_seconds"`
 	// EnableTLS: 是否启用 TLS/SSL 连接
 	EnableTLS bool `mapstructure:"enable_tls"`
 }
@@ -1316,6 +1320,15 @@ type RedisConfig struct {
 // ParseURL parses a Redis connection URL and populates the config fields.
 // URL format: redis://host:port or rediss://host:port (TLS)
 // Supports: redis://, rediss://
+// Query parameters (optional):
+//   - pool_size: 连接池大小
+//   - min_idle_conns: 最小空闲连接数
+//   - idle_timeout_seconds: 空闲超时(秒)
+//   - dial_timeout_seconds: 建连超时(秒)
+//   - read_timeout_seconds: 读取超时(秒)
+//   - write_timeout_seconds: 写入超时(秒)
+//
+// Example: redis://:password@redis.example.com:6379/0?pool_size=256&min_idle_conns=20&idle_timeout_seconds=300
 func (r *RedisConfig) ParseURL(urlStr string) error {
 	if urlStr == "" {
 		return nil
@@ -1340,6 +1353,40 @@ func (r *RedisConfig) ParseURL(urlStr string) error {
 	// Detect TLS from scheme
 	if u.Scheme == "rediss" {
 		r.EnableTLS = true
+	}
+
+	// Parse query parameters for connection pool settings
+	if u.Query != nil {
+		if v := u.Query.Get("pool_size"); v != "" {
+			if i, err := strconv.Atoi(v); err == nil {
+				r.PoolSize = i
+			}
+		}
+		if v := u.Query.Get("min_idle_conns"); v != "" {
+			if i, err := strconv.Atoi(v); err == nil {
+				r.MinIdleConns = i
+			}
+		}
+		if v := u.Query.Get("idle_timeout_seconds"); v != "" {
+			if i, err := strconv.Atoi(v); err == nil {
+				r.IdleTimeoutSeconds = i
+			}
+		}
+		if v := u.Query.Get("dial_timeout_seconds"); v != "" {
+			if i, err := strconv.Atoi(v); err == nil {
+				r.DialTimeoutSeconds = i
+			}
+		}
+		if v := u.Query.Get("read_timeout_seconds"); v != "" {
+			if i, err := strconv.Atoi(v); err == nil {
+				r.ReadTimeoutSeconds = i
+			}
+		}
+		if v := u.Query.Get("write_timeout_seconds"); v != "" {
+			if i, err := strconv.Atoi(v); err == nil {
+				r.WriteTimeoutSeconds = i
+			}
+		}
 	}
 
 	return nil
@@ -1939,7 +1986,8 @@ func setDefaults() {
 	viper.SetDefault("redis.read_timeout_seconds", 3)
 	viper.SetDefault("redis.write_timeout_seconds", 3)
 	viper.SetDefault("redis.pool_size", 1024)
-	viper.SetDefault("redis.min_idle_conns", 128)
+	viper.SetDefault("redis.min_idle_conns", 20)
+	viper.SetDefault("redis.idle_timeout_seconds", 300) // 5 分钟空闲超时
 	viper.SetDefault("redis.enable_tls", false)
 
 	// Ops (vNext)
@@ -2530,6 +2578,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Redis.MinIdleConns > c.Redis.PoolSize {
 		return fmt.Errorf("redis.min_idle_conns cannot exceed redis.pool_size")
+	}
+	if c.Redis.IdleTimeoutSeconds < 0 {
+		return fmt.Errorf("redis.idle_timeout_seconds must be non-negative")
 	}
 	if c.Dashboard.Enabled {
 		if c.Dashboard.StatsFreshTTLSeconds <= 0 {
