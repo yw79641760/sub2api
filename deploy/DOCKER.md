@@ -112,6 +112,25 @@ Example:
 DATABASE_URL=postgres://user:pass@host:5432/sub2api?sslmode=disable&search_path=public&timezone=Asia/Shanghai
 ```
 
+### Database Connection Pool (Optional)
+
+数据库连接池参数通过独立环境变量配置：
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_MAX_OPEN_CONNS` | 最大打开连接数 | 256 |
+| `DATABASE_MAX_IDLE_CONNS` | 最大空闲连接数 | 128 |
+| `DATABASE_CONN_MAX_LIFETIME_MINUTES` | 连接最大生命周期（分钟） | 30 |
+| `DATABASE_CONN_MAX_IDLE_TIME_MINUTES` | 空闲连接最大时间（分钟） | 5 |
+
+Example:
+```yaml
+environment:
+  - DATABASE_URL=postgres://postgres:postgres@db:5432/sub2api?sslmode=disable
+  - DATABASE_MAX_OPEN_CONNS=256
+  - DATABASE_MAX_IDLE_CONNS=128
+```
+
 ### Redis Connection Pool (Optional)
 
 Redis 连接池参数可以通过 `REDIS_URL` 查询参数配置：
