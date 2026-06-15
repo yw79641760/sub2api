@@ -9,7 +9,7 @@ Sub2API is an AI API Gateway Platform for distributing and managing AI product s
 docker run -d \
   --name sub2api \
   -p 8080:8080 \
-  -e DATABASE_URL="postgres://user:pass@host:5432/sub2api" \
+  -e DATABASE_URL="postgres://user:pass@host:5432/sub2api?sslmode=disable&search_path=public" \
   -e REDIS_URL="redis://host:6379?pool_size=256&min_idle_conns=20&idle_timeout_seconds=300" \
   yw79641760/sub2api:latest
 ```
@@ -95,8 +95,22 @@ volumes:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string (JDBC format) | `postgres://user:pass@host:5432/sub2api?sslmode=disable` |
+| `DATABASE_URL` | PostgreSQL connection string | `postgres://user:pass@host:5432/sub2api?sslmode=disable&search_path=public` |
 | `REDIS_URL` | Redis connection string | `redis://host:6379` or `rediss://host:6379` (TLS) |
+
+**DATABASE_URL 查询参数**：
+
+| Query Parameter | Description | Default |
+|-----------------|-------------|---------|
+| `sslmode` | SSL 模式 | `prefer` |
+| `search_path` | PostgreSQL schema | `public` |
+| `timezone` | 时区 | `Asia/Shanghai` |
+
+Example:
+```bash
+# 完整配置
+DATABASE_URL=postgres://user:pass@host:5432/sub2api?sslmode=disable&search_path=public&timezone=Asia/Shanghai
+```
 
 ### Redis Connection Pool (Optional)
 
